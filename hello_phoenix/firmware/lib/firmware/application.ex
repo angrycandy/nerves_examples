@@ -17,6 +17,14 @@ defmodule Firmware.Application do
         # {Firmware.Worker, arg},
       ] ++ children(target())
 
+    # stop blinkys
+    led_base_path = "/sys/class/leds"
+    File.ls!(led_base_path)
+    |> Enum.each(fn led ->
+      Path.join([led_base_path, led, "trigger"])
+      |> File.write("none")
+    end)
+
     Supervisor.start_link(children, opts)
   end
 
