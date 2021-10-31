@@ -100,7 +100,8 @@ defmodule BlueHeronScan do
   end
 
   @doc """
-  Enable scanning.
+  Enable BLE Scanning. This will deliver messages to the process mailbox
+  when other devices broadcast.
   
   Returns `:ok` or `{:error, :not_working}` if uninitialized.
   """
@@ -155,6 +156,18 @@ defmodule BlueHeronScan do
     GenServer.call(pid, {:ignore_cids, cids})
   end
 
+  @doc """
+  Clear / set the hook to call when a device is updated
+
+      iex> BlueHeronScan.device_update_hook(pid)
+      :ok
+      iex> BlueHeronScan.device_update_hook(pid, fn device -> ... end)
+      :ok
+  """
+  def device_update_hook(pid, hook \\ nil) do
+    GenServer.call(pid, {:device_update_hook, hook})
+  end
+
   @impl GenServer
   def init(config) do
     # Create a context for BlueHeron to operate with.
@@ -163,14 +176,13 @@ defmodule BlueHeronScan do
     # Subscribe to HCI and ACL events.
     BlueHeron.add_event_handler(ctx)
 
-    {:ok, %{ctx: ctx, working: false, devices: %{}, ignore_cids: [6, 76]}}
+    {:ok, %{ctx: ctx, working: false, devices: %{}, ignore_cids: [6, 76],
+	    hook: fn _device -> nil end}}
   end
 
   # Sent when a transport connection is established.
   @impl GenServer
   def handle_info({:BLUETOOTH_EVENT_STATE, :HCI_STATE_WORKING}, state) do
-    # Enable BLE Scanning. This will deliver messages to the process mailbox
-    # when other devices broadcast.
     state = %{state | working: true}
     Logger.info("#{__MODULE__} working")
     {:noreply, state}
@@ -207,6 +219,14 @@ defmodule BlueHeronScan do
       Enumerable.impl_for(cids) != nil ->
 	{:reply, {:ok, cids}, %{state | ignore_cids: cids}}
       true -> {:reply, {:error, :not_enumerable}, state}
+    end
+  end
+
+  @impl GenServer
+  def handle_call({:device_update_hook, hook}, _from, state) do
+    case hook do
+      nil -> {:reply, :ok, %{state| hook: fn _device -> nil end}}
+	_ -> {:reply, :ok, %{state| hook: hook}}
     end
   end
 
@@ -260,6 +280,7 @@ defmodule BlueHeronScan do
       do
         device = Map.get(state.devices, addr, %{})
 	device = Map.merge(device, %{cid => sdata, time: DateTime.utc_now()})
+	state.hook.(device)
 	%{state | devices: Map.put(state.devices, addr, device)}
       else
 	_ -> state
