@@ -106,16 +106,14 @@ defmodule BlueHeronScan do
   Returns `:ok` or `{:error, :not_working}` if uninitialized.
   """
   def enable(pid) do
-    GenServer.call(pid, {:scan, true})
+    GenServer.call(pid, :scan_enable)
   end
 
   @doc """
   Disable scanning.
-
-  Returns `:ok` or `{:error, :not_working}` if uninitialized.
   """
   def disable(pid) do
-    GenServer.call(pid, {:scan, false})
+    send(pid, :scan_disable)
   end
 
   @doc """
@@ -161,7 +159,7 @@ defmodule BlueHeronScan do
 
       iex> BlueHeronScan.device_update_hook(pid)
       :ok
-      iex> BlueHeronScan.device_update_hook(pid, fn device -> ... end)
+      iex> BlueHeronScan.device_update_hook(pid, fn arg -> ... end)
       :ok
   """
   def device_update_hook(pid, hook \\ nil) do
@@ -177,7 +175,7 @@ defmodule BlueHeronScan do
     BlueHeron.add_event_handler(ctx)
 
     {:ok, %{ctx: ctx, working: false, devices: %{}, ignore_cids: [6, 76],
-	    hook: fn _device -> nil end}}
+	    hook: fn _arg -> nil end}}
   end
 
   # Sent when a transport connection is established.
@@ -189,16 +187,19 @@ defmodule BlueHeronScan do
   end
 
   # Scan AdvertisingReport packets.
-  @impl GenServer
   def handle_info(
     {:HCI_EVENT_PACKET, %AdvertisingReport{devices: devices}}, state) do
     {:noreply, Enum.reduce(devices, state, &scan_device/2)}
   end
 
   # Ignore other HCI Events.
-  @impl GenServer
   def handle_info({:HCI_EVENT_PACKET, _val}, state) do
     # Logger.debug("#{__MODULE__} ignore HCI Event #{inspect(val)}")
+    {:noreply, state}
+  end
+
+  def handle_info(:scan_disable, state) do
+    scan(state, false)
     {:noreply, state}
   end
 
@@ -207,12 +208,10 @@ defmodule BlueHeronScan do
     {:reply, {:ok, state.devices}, state}
   end
 
-  @impl GenServer
   def handle_call(:clear_devices, _from, state) do
     {:reply, :ok, %{state | devices: %{}}}
   end
 
-  @impl GenServer
   def handle_call({:ignore_cids, cids}, _from, state) do
     cond do
       cids == nil -> {:reply, {:ok, state.ignore_cids}, state}
@@ -222,17 +221,15 @@ defmodule BlueHeronScan do
     end
   end
 
-  @impl GenServer
   def handle_call({:device_update_hook, hook}, _from, state) do
     case hook do
-      nil -> {:reply, :ok, %{state| hook: fn _device -> nil end}}
-	_ -> {:reply, :ok, %{state| hook: hook}}
+      nil -> {:reply, :ok, %{state | hook: fn _arg -> nil end}}
+	_ -> {:reply, :ok, %{state | hook: hook}}
     end
   end
 
-  @impl GenServer
-  def handle_call({:scan, enable}, _from, state) do
-    {:reply, scan(state, enable), state}
+  def handle_call(:scan_enable, _from, state) do
+    {:reply, scan(state, true), state}
   end
 
   defp scan(%{working: false}, _enable) do
@@ -280,7 +277,8 @@ defmodule BlueHeronScan do
       do
         device = Map.get(state.devices, addr, %{})
 	device = Map.merge(device, %{cid => sdata, time: DateTime.utc_now()})
-	state.hook.(device)
+	# state.hook.(device)
+	state.hook.({addr, device})
 	%{state | devices: Map.put(state.devices, addr, device)}
       else
 	_ -> state
