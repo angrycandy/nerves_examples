@@ -4,28 +4,20 @@ defmodule UiWeb.SensorsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    init_ble()
     socket = socket
+    |> start_scan()
     |> assign(:page_title, "Sensors")
-    |> assign(:val, %{})
-    |> assign(:scanning, true)
     {:ok, socket}
   end
 
   @impl true
   def handle_event("scan", _, socket) do
-    init_ble()
-    socket = socket
-    |> assign(:val, %{})
-    |> assign(:scanning, true)
-    {:noreply, socket}
+    {:noreply, start_scan(socket)}
   end
 
   @impl true
   def handle_info("cancel", socket) do
-    socket = socket
-    |> assign(:scanning, false)
-    {:noreply, socket}
+    {:noreply, stop_scan(socket)}
   end
 
   @impl true
@@ -47,37 +39,74 @@ defmodule UiWeb.SensorsLive do
 
   @impl true
   def handle_cast({addr, dmap}, socket) do
+    if socket.assigns.scanning do
+      {:noreply, add_device(addr, dmap, socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def terminate(_reason, socket) do
+    stop_scan(socket)
+  end
+
+  defp add_device(addr, dmap, socket) do
     dev = device(dmap)
-    socket =
     unless String.length(dev) == 0 do
       val = Map.put(socket.assigns.val, addr, dev)
-      done = Enum.count(val) < 2
-      Logger.info("#{__MODULE__} #{done} #{inspect(val)}")
-      if done do
+      scanning = Enum.count(val) < 2
+      Logger.info("#{__MODULE__} #{scanning} #{inspect(val)}")
+      if scanning do
+	assign(socket, :val, val)
+      else
+	socket
+	|> assign(:val, val)
+	|> stop_scan()
       end
-      socket
-      |> assign(:val, val)
-      |> assign(:scanning, Enum.count(val) < 2)
     else
       socket
     end
-    {:noreply, socket}
   end
 
-  @enable_time 10000
+  @enable_time 12000
 
-  defp init_ble() do
-    pid = Process.whereis(BlueHeronScan)
-    if pid do
-      me = self()
-      hook = fn arg -> GenServer.cast(me, arg) end
-      GenServer.call(pid, {:device_update_hook, hook})
-      GenServer.call(pid, :scan_enable)
-      Process.send_after(pid, :scan_disable, @enable_time)
-      Process.send_after(self(), "cancel", @enable_time)
-      Logger.info("#{__MODULE__} #{inspect(self())} init BlueHeronScan")
+  defp start_scan(socket) do
+    if not Map.get(socket.assigns, :scanning, false) do
+      pid = Process.whereis(BlueHeronScan)
+      if pid do
+	me = self()
+	hook = fn arg -> GenServer.cast(me, arg) end
+	GenServer.call(pid, {:device_update_hook, hook})
+	GenServer.call(pid, :scan_enable)
+	timer_me = Process.send_after(me, "cancel", @enable_time)
+	timer_ble = Process.send_after(pid, :scan_disable, @enable_time)
+	Logger.info("#{__MODULE__} #{inspect(me)} init BlueHeronScan")
+	socket
+	|> assign(:timers, [timer_ble, timer_me])
+	|> assign(:val, %{})
+	|> assign(:scanning, true)
+      else
+	Logger.info("#{__MODULE__} #{inspect(self())} no BlueHeronScan")
+	socket
+	|> assign(:val, %{0 => "Bluetooth scanner not found."})
+	|> assign(:scanning, false)
+      end
     else
-      Logger.info("#{__MODULE__} #{inspect(self())} no BlueHeronScan")
+      socket
+    end
+  end
+
+  defp stop_scan(socket) do
+    Logger.info("#{__MODULE__} stop scan")
+    if socket.assigns.scanning do
+      send(BlueHeronScan, :scan_disable)
+      for timer_ref <- socket.assigns.timers do
+	Process.cancel_timer(timer_ref, async: true, info: false)
+      end
+      assign(socket, :scanning, false)
+    else
+      socket
     end
   end
 
