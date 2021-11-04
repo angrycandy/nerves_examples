@@ -100,7 +100,7 @@ defmodule BlueHeronScan do
   end
 
   @doc """
-  Enable BLE Scanning. This will deliver messages to the process mailbox
+  Enable BLE scanning. This will deliver messages to the process mailbox
   when other devices broadcast.
   
   Returns `:ok` or `{:error, :not_working}` if uninitialized.
@@ -110,7 +110,7 @@ defmodule BlueHeronScan do
   end
 
   @doc """
-  Disable scanning.
+  Disable BLE scanning.
   """
   def disable(pid) do
     send(pid, :scan_disable)

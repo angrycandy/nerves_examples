@@ -1,6 +1,7 @@
 defmodule UiWeb.SensorsLive do
   use UiWeb, :live_view
   require Logger
+  require Math
 
   @impl true
   def mount(_params, _session, socket) do
@@ -8,16 +9,6 @@ defmodule UiWeb.SensorsLive do
     |> start_scan()
     |> assign(:page_title, "Sensors")
     {:ok, socket}
-  end
-
-  @impl true
-  def handle_event("scan", _, socket) do
-    {:noreply, start_scan(socket)}
-  end
-
-  @impl true
-  def handle_info("cancel", socket) do
-    {:noreply, stop_scan(socket)}
   end
 
   @impl true
@@ -38,12 +29,13 @@ defmodule UiWeb.SensorsLive do
   end
 
   @impl true
-  def handle_cast({addr, dmap}, socket) do
-    if socket.assigns.scanning do
-      {:noreply, add_device(addr, dmap, socket)}
-    else
-      {:noreply, socket}
-    end
+  def handle_event("scan", _, socket) do
+    {:noreply, start_scan(socket)}
+  end
+
+  @impl true
+  def handle_info("cancel", socket) do
+    {:noreply, stop_scan(socket)}
   end
 
   @impl true
@@ -51,8 +43,17 @@ defmodule UiWeb.SensorsLive do
     stop_scan(socket)
   end
 
-  defp add_device(addr, dmap, socket) do
-    dev = device(dmap)
+  @impl true
+  def handle_cast({addr, device}, socket) do
+    if socket.assigns.scanning do
+      {:noreply, add_device(addr, device, socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp add_device(addr, device, socket) do
+    dev = print(device)
     unless String.length(dev) == 0 do
       val = Map.put(socket.assigns.val, addr, dev)
       scanning = Enum.count(val) < 2
@@ -69,8 +70,12 @@ defmodule UiWeb.SensorsLive do
     end
   end
 
-  @enable_time 12000
+  # Limit the scan time to minimize battery drain on sensors that
+  # send extra reports during active scan.
+  @enable_time 12_000
 
+  # If there are simultaneous users this should be its own Genserver,
+  # but for a few users it's good enough.
   defp start_scan(socket) do
     if not Map.get(socket.assigns, :scanning, false) do
       pid = Process.whereis(BlueHeronScan)
@@ -110,39 +115,19 @@ defmodule UiWeb.SensorsLive do
     end
   end
 
-  require Math
-
-  defp device(dmap) do
-    Enum.reduce(dmap, [], fn {k, v}, acc ->
+  defp print(device) do
+    Enum.reduce(device, [], fn {k, v}, acc ->
       case print_device(k, v) do
 	nil -> acc
-	s -> [s <> " · " <> Map.get(dmap, :name, "") | acc]
+	s -> [s <> " · " <> Map.get(device, :name, "") | acc]
       end
     end)
     |> Enum.join(" ")
   end
 
-  # https://bmcnoldy.rsmas.miami.edu/Humidity.html
-  # t˚C rh %
-  defp dewpoint(t, rh) do
-    243.04*(Math.log(rh/100)+((17.625*t)/(243.04+t))) /
-    (17.625-Math.log(rh/100)-((17.625*t)/(243.04+t)))
-  end
-
-  defp c_to_f(c) do
-    (c * 9/5) + 32
-  end
-
-  defp summary(tem_c, rh, bat) do
-    dew_c = dewpoint(tem_c, rh)
-    dew_f = Float.round(c_to_f(dew_c), 1)
-    tem_f = Float.round(c_to_f(tem_c), 1)
-    "Temp #{tem_f}˚F Dew Pt #{dew_f}˚F 🔋#{bat}%"
-  end
-
   # https://github.com/Home-Is-Where-You-Hang-Your-Hack/sensor.goveetemp_bt_hci
   # custom_components/govee_ble_hci/govee_advertisement.py
-  # GVH5102
+  # GVH5102 https://fccid.io/2AQA6-H5102 Thermo-Hygrometer
   defp print_device(0x0001, <<_::16, temhum::24, bat::8>>) do
     tem_c = temhum/10000
     rh = rem(temhum, 1000)/10
@@ -152,7 +137,7 @@ defmodule UiWeb.SensorsLive do
   # https://github.com/wcbonner/GoveeBTTempLogger
   # goveebttemplogger.cpp
   # bool Govee_Temp::ReadMSG(const uint8_t * const data)
-  # Govee_H5074
+  # Govee_H5074 https://fccid.io/2AQA6-H5074 Thermo-Hygrometer
   defp print_device(0xec88, <<_::8, tem::little-16, hum::little-16,
     bat::8, _::8>>
   ) do
@@ -163,6 +148,25 @@ defmodule UiWeb.SensorsLive do
 
   defp print_device(_cid, _data) do
     nil
+  end
+
+  defp summary(tem_c, rh, bat) do
+    dew_c = dewpoint(tem_c, rh)
+    dew_f = Float.round(c_to_f(dew_c), 1)
+    tem_f = Float.round(c_to_f(tem_c), 1)
+    "Temp #{tem_f}˚F Dew Pt #{dew_f}˚F 🔋#{bat}%"
+  end
+
+  # https://www.kgun9.com/weather/the-difference-between-dew-point-and-humidity
+  # https://bmcnoldy.rsmas.miami.edu/Humidity.html
+  # t˚C rh %
+  defp dewpoint(t, rh) do
+    243.04*(Math.log(rh/100)+((17.625*t)/(243.04+t))) /
+    (17.625-Math.log(rh/100)-((17.625*t)/(243.04+t)))
+  end
+
+  defp c_to_f(c) do
+    (c * 9/5) + 32
   end
 
 end
