@@ -15,13 +15,14 @@ defmodule UiWeb.SensorsLive do
   def render(assigns) do
     ~L"""
     <section>
-      <h2>Inside · Out</h2>
+      <h2>Sensors</h2>
       <%= for {_, line} <- @val do %>
         <%= line %><br>
       <% end %>
       <%= if @scanning do %>
         Scanning...
       <% else %>
+        <br>
         <button phx-click="scan">scan</button>
       <% end %>
     </section>
@@ -119,7 +120,7 @@ defmodule UiWeb.SensorsLive do
     Enum.reduce(device, [], fn {k, v}, acc ->
       case print_device(k, v) do
 	nil -> acc
-	s -> [s <> " · " <> Map.get(device, :name, "") | acc]
+	s -> [s <> " · " <> rename(Map.get(device, :name, "")) | acc]
       end
     end)
     |> Enum.join(" ")
@@ -148,6 +149,14 @@ defmodule UiWeb.SensorsLive do
 
   defp print_device(_cid, _data) do
     nil
+  end
+
+  defp rename(name) do
+    nmap = %{
+      "GVH5102_EED5" => "inside",
+      "Govee_H5074_F092" => "outside"
+    }
+    Map.get(nmap, name, name)
   end
 
   defp summary(tem_c, rh, bat) do
