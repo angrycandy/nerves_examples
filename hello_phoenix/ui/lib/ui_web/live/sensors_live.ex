@@ -6,8 +6,10 @@ defmodule UiWeb.SensorsLive do
   @impl true
   def mount(_params, _session, socket) do
     socket = socket
-    |> start_scan()
     |> assign(:page_title, "Sensors")
+    |> assign(:val, %{0 => "Connecting..."})
+    |> assign(:scanning, false)
+    |> start_scan()
     {:ok, socket}
   end
 
@@ -78,11 +80,13 @@ defmodule UiWeb.SensorsLive do
   # If there are simultaneous users this should be its own Genserver,
   # but for a few users it's good enough.
   defp start_scan(socket) do
-    if not Map.get(socket.assigns, :scanning, false) do
+    if connected?(socket) and not socket.assigns.scanning do
       pid = Process.whereis(BlueHeronScan)
       if pid do
 	me = self()
-	hook = fn arg -> GenServer.cast(me, arg) end
+	hook = fn {_, device} = arg ->
+	  if(device[:name], do: GenServer.cast(me, arg))
+	end
 	GenServer.call(pid, {:device_update_hook, hook})
 	GenServer.call(pid, :scan_enable)
 	timer_me = Process.send_after(me, "cancel", @enable_time)
@@ -96,7 +100,6 @@ defmodule UiWeb.SensorsLive do
 	Logger.info("#{__MODULE__} #{inspect(self())} no BlueHeronScan")
 	socket
 	|> assign(:val, %{0 => "Bluetooth scanner not found."})
-	|> assign(:scanning, false)
       end
     else
       socket
@@ -120,7 +123,7 @@ defmodule UiWeb.SensorsLive do
     Enum.reduce(device, [], fn {k, v}, acc ->
       case print_device(k, v) do
 	nil -> acc
-	s -> [s <> " · " <> rename(Map.get(device, :name, "")) | acc]
+	s -> [s <> " · " <> rename(device[:name]) | acc]
       end
     end)
     |> Enum.join(" ")
@@ -156,7 +159,7 @@ defmodule UiWeb.SensorsLive do
       "GVH5102_EED5" => "inside",
       "Govee_H5074_F092" => "outside"
     }
-    Map.get(nmap, name, name)
+    Map.get(nmap, name, "")
   end
 
   defp summary(tem_c, rh, bat) do

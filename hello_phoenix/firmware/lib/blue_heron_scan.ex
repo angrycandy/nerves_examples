@@ -215,8 +215,8 @@ defmodule BlueHeronScan do
   def handle_call({:ignore_cids, cids}, _from, state) do
     cond do
       cids == nil -> {:reply, {:ok, state.ignore_cids}, state}
-      Enumerable.impl_for(cids) != nil ->
-	{:reply, {:ok, cids}, %{state | ignore_cids: cids}}
+      Enumerable.impl_for(cids) ->
+      	{:reply, {:ok, cids}, %{state | ignore_cids: cids}}
       true -> {:reply, {:error, :not_enumerable}, state}
     end
   end
