@@ -142,7 +142,7 @@ defmodule UiWeb.SensorsLive do
   # goveebttemplogger.cpp
   # bool Govee_Temp::ReadMSG(const uint8_t * const data)
   # Govee_H5074 https://fccid.io/2AQA6-H5074 Thermo-Hygrometer
-  defp print_device(0xec88, <<_::8, tem::little-16, hum::little-16,
+  defp print_device(0xec88, <<_::8, tem::signed-little-16, hum::little-16,
     bat::8, _::8>>
   ) do
     tem_c = tem/100
